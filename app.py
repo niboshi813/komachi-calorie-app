@@ -5,271 +5,315 @@ from datetime import date
 import pandas as pd
 
 st.set_page_config(
-    page_title="小町のカロリー計算アプリ",
+    page_title="小町の健康管理アプリ",
     page_icon="🐶",
     layout="centered"
 )
 
-st.title("🐶 小町のカロリー計算アプリ")
-st.write("体重・食事・運動を入力すると、カロリーバランスを確認できます。")
+st.title("🐶 小町の健康管理アプリ")
+st.caption("スマホで使いやすい、小町専用の必要カロリー＆成長記録アプリ")
 
-# 保存ファイル名
 file_name = "dog_log.csv"
+photo_dir = "photos"
+
+# 写真保存フォルダ
+os.makedirs(photo_dir, exist_ok=True)
+
 
 # -------------------------
-# 基本情報
+# MER係数を決める関数
 # -------------------------
-st.header("基本情報")
-log_date = st.date_input("日付", value=date.today())
-weight = st.number_input("体重 (kg)", min_value=0.0, step=0.1)
+def get_mer_factor(age_group, neutered, body_type, activity_level):
+    if age_group == "子犬":
+        base_factor = 2.5
+    elif age_group == "成犬":
+        base_factor = 1.6 if neutered == "あり" else 1.8
+    else:  # シニア
+        base_factor = 1.2 if neutered == "あり" else 1.4
 
-# -------------------------
-# 食事
-# -------------------------
-st.header("食事")
-food_kcal = st.number_input("ご飯カロリー (kcal)", min_value=0, step=10)
-snack_kcal = st.number_input("おやつカロリー (kcal)", min_value=0, step=10)
+    body_factor_map = {
+        "やせ": 1.1,
+        "標準": 1.0,
+        "ぽっちゃり": 0.9
+    }
+    body_factor = body_factor_map[body_type]
 
-# -------------------------
-# 運動
-# -------------------------
-st.header("運動")
+    activity_factor_map = {
+        "少ない": 0.9,
+        "普通": 1.0,
+        "多い": 1.2
+    }
+    activity_factor = activity_factor_map[activity_level]
 
-exercise_types = {
-    "なし": 0.0,
-    "ゆっくり散歩": 0.08,
-    "普通の散歩": 0.12,
-    "速歩": 0.16,
-    "ラン": 0.22,
-    "ドッグラン": 0.18,
-    "室内遊び": 0.10
-}
+    return base_factor * body_factor * activity_factor
 
-exercise_type1 = st.selectbox("運動タイプ①", list(exercise_types.keys()))
-exercise_time1 = st.number_input("運動時間① (分)", min_value=0, step=5)
-
-exercise_type2 = st.selectbox("運動タイプ②", list(exercise_types.keys()))
-exercise_time2 = st.number_input("運動時間② (分)", min_value=0, step=5)
 
 # -------------------------
-# 備考
+# データ読み込み関数
 # -------------------------
-st.header("備考")
-memo = st.text_area(
-    "メモ・備考",
-    placeholder="例：朝うんち良好、おやつ少なめ、散歩でよく走った など"
-)
+def load_data():
+    if os.path.exists(file_name):
+        df = pd.read_csv(file_name, encoding="utf-8-sig")
+        if not df.empty:
+            df["日付"] = pd.to_datetime(df["日付"], errors="coerce")
+            df = df.sort_values("日付", ascending=False).reset_index(drop=True)
+        return df
+    return pd.DataFrame()
 
-# 計算結果を保存する箱
-calculated_data = None
 
 # -------------------------
-# 計算ボタン
+# タブ構成
 # -------------------------
-if st.button("計算する"):
-    if weight <= 0:
-        st.error("体重を入力してください。")
-    else:
-        # RER計算
-        rer = 70 * (weight ** 0.75)
+tab1, tab2, tab3 = st.tabs(["計算", "履歴", "アルバム"])
 
-        # DER（今回は係数1.6で固定）
-        der = rer * 1.6
 
-        # 摂取カロリー
-        intake = food_kcal + snack_kcal
+# =========================================================
+# 計算タブ
+# =========================================================
+with tab1:
+    st.subheader("今日の必要カロリーを計算")
 
-        # 運動消費カロリー
-        burn1 = weight * exercise_types[exercise_type1] * exercise_time1
-        burn2 = weight * exercise_types[exercise_type2] * exercise_time2
-        exercise_burn = burn1 + burn2
+    log_date = st.date_input("日付", value=date.today(), key="calc_date")
+    weight = st.number_input("体重 (kg)", min_value=0.0, step=0.1, key="calc_weight")
 
-        # 総消費カロリー
-        total_burn = rer + exercise_burn
+    age_group = st.selectbox(
+        "年齢",
+        ["子犬", "成犬", "シニア"],
+        key="calc_age"
+    )
 
-        # カロリーバランス
-        balance = intake - total_burn
+    neutered = st.selectbox(
+        "去勢・避妊の有無",
+        ["あり", "なし"],
+        key="calc_neutered"
+    )
 
-        # 判定とコメント
-        if balance < -100:
-            result = "不足"
-            comment = "ごはん量が少ないかもしれません。体重の変化も確認してみましょう。"
-        elif -100 <= balance < -30:
-            result = "やや不足"
-            comment = "少し少なめです。体調や便の様子を見ながら調整しましょう。"
-        elif -30 <= balance <= 30:
-            result = "適正"
-            comment = "いいバランスです。今の食事と運動を続けやすい状態です。"
-        elif 30 < balance <= 100:
-            result = "やや多め"
-            comment = "少し多めです。おやつ量やごはん量を少し見直してもよさそうです。"
+    body_type = st.selectbox(
+        "体型",
+        ["やせ", "標準", "ぽっちゃり"],
+        key="calc_body"
+    )
+
+    activity_level = st.selectbox(
+        "活動量",
+        ["少ない", "普通", "多い"],
+        key="calc_activity"
+    )
+
+    memo = st.text_area(
+        "メモ・備考",
+        placeholder="例：最近少しやせ気味、食欲あり、毛並み良好 など",
+        key="calc_memo"
+    )
+
+    photo = st.file_uploader(
+        "写真を追加",
+        type=["jpg", "jpeg", "png"],
+        key="calc_photo"
+    )
+
+    calculated_data = None
+
+    if st.button("計算する", use_container_width=True):
+        if weight <= 0:
+            st.error("体重を入力してください。")
         else:
-            result = "多め"
-            comment = "食べすぎ気味かもしれません。食事量やおやつ量を調整してみましょう。"
+            rer = 70 * (weight ** 0.75)
+            mer_factor = get_mer_factor(age_group, neutered, body_type, activity_level)
+            mer = rer * mer_factor
+            daily_kcal = mer
 
-        # 保存用データ
-        calculated_data = {
-            "日付": str(log_date),
-            "体重(kg)": round(weight, 1),
-            "目安摂取カロリー(DER)": round(der, 1),
-            "摂取カロリー合計": round(intake, 1),
-            "運動消費カロリー": round(exercise_burn, 1),
-            "総消費カロリー": round(total_burn, 1),
-            "カロリーバランス": round(balance, 1),
-            "判定": result,
-            "コメント": comment,
-            "備考": memo
-        }
+            note_text = "これは推定値です。2〜4週間の体重変化を見ながら食事量を調整してください。"
 
-        st.session_state["calculated_data"] = calculated_data
+            photo_name = ""
+            if photo is not None:
+                ext = photo.name.split(".")[-1]
+                photo_name = f"{log_date}_{weight:.1f}kg.{ext}"
 
-# 計算済みデータを取り出す
-if "calculated_data" in st.session_state:
-    calculated_data = st.session_state["calculated_data"]
+            calculated_data = {
+                "日付": str(log_date),
+                "体重(kg)": round(weight, 1),
+                "年齢": age_group,
+                "去勢避妊": neutered,
+                "体型": body_type,
+                "活動量": activity_level,
+                "RER": round(rer, 1),
+                "推定MER": round(mer, 1),
+                "1日目安カロリー": round(daily_kcal, 1),
+                "注意文": note_text,
+                "備考": memo,
+                "写真ファイル名": photo_name
+            }
 
-# -------------------------
-# 結果表示
-# -------------------------
-if calculated_data is not None:
-    st.header("結果")
+            st.session_state["calculated_data"] = calculated_data
+            st.session_state["uploaded_photo"] = photo
 
-    col1, col2 = st.columns(2)
+    if "calculated_data" in st.session_state:
+        calculated_data = st.session_state["calculated_data"]
 
-    with col1:
-        st.metric("目安摂取カロリー（DER）", f'{calculated_data["目安摂取カロリー(DER)"]:.1f} kcal')
-        st.metric("摂取カロリー合計", f'{calculated_data["摂取カロリー合計"]:.1f} kcal')
-        st.metric("運動消費カロリー", f'{calculated_data["運動消費カロリー"]:.1f} kcal')
+    if calculated_data is not None:
+        st.divider()
+        st.subheader("結果")
 
-    with col2:
-        st.metric("総消費カロリー", f'{calculated_data["総消費カロリー"]:.1f} kcal')
-        st.metric("カロリーバランス", f'{calculated_data["カロリーバランス"]:.1f} kcal')
-        st.metric("判定", calculated_data["判定"])
+        st.metric("RER", f'{calculated_data["RER"]:.1f} kcal')
+        st.metric("推定MER", f'{calculated_data["推定MER"]:.1f} kcal')
+        st.metric("1日目安カロリー", f'{calculated_data["1日目安カロリー"]:.1f} kcal')
 
-    st.subheader("コメント")
-    st.write(calculated_data["コメント"])
+        st.info("これは推定値です。2〜4週間の体重変化を見ながら食事量を調整してください。")
 
-    if calculated_data["備考"]:
-        st.subheader("備考")
-        st.write(calculated_data["備考"])
+        if calculated_data["備考"]:
+            st.write(f"**備考**: {calculated_data['備考']}")
 
-    # 保存ボタン
-    if st.button("この結果を保存する"):
-        file_exists = os.path.exists(file_name)
+        if "uploaded_photo" in st.session_state and st.session_state["uploaded_photo"] is not None:
+            st.write("**選択中の写真**")
+            st.image(st.session_state["uploaded_photo"], use_container_width=True)
 
-        with open(file_name, mode="a", newline="", encoding="utf-8-sig") as file:
-            writer = csv.writer(file)
+        if st.button("この結果を保存する", use_container_width=True):
+            file_exists = os.path.exists(file_name)
 
-            if not file_exists:
+            # 写真保存
+            if "uploaded_photo" in st.session_state and st.session_state["uploaded_photo"] is not None:
+                uploaded_photo = st.session_state["uploaded_photo"]
+                photo_path = os.path.join(photo_dir, calculated_data["写真ファイル名"])
+                with open(photo_path, "wb") as f:
+                    f.write(uploaded_photo.getbuffer())
+
+            # CSV保存
+            with open(file_name, mode="a", newline="", encoding="utf-8-sig") as file:
+                writer = csv.writer(file)
+
+                if not file_exists:
+                    writer.writerow([
+                        "日付",
+                        "体重(kg)",
+                        "年齢",
+                        "去勢避妊",
+                        "体型",
+                        "活動量",
+                        "RER",
+                        "推定MER",
+                        "1日目安カロリー",
+                        "注意文",
+                        "備考",
+                        "写真ファイル名"
+                    ])
+
                 writer.writerow([
-                    "日付",
-                    "体重(kg)",
-                    "目安摂取カロリー(DER)",
-                    "摂取カロリー合計",
-                    "運動消費カロリー",
-                    "総消費カロリー",
-                    "カロリーバランス",
-                    "判定",
-                    "コメント",
-                    "備考"
+                    calculated_data["日付"],
+                    calculated_data["体重(kg)"],
+                    calculated_data["年齢"],
+                    calculated_data["去勢避妊"],
+                    calculated_data["体型"],
+                    calculated_data["活動量"],
+                    calculated_data["RER"],
+                    calculated_data["推定MER"],
+                    calculated_data["1日目安カロリー"],
+                    calculated_data["注意文"],
+                    calculated_data["備考"],
+                    calculated_data["写真ファイル名"]
                 ])
 
-            writer.writerow([
-                calculated_data["日付"],
-                calculated_data["体重(kg)"],
-                calculated_data["目安摂取カロリー(DER)"],
-                calculated_data["摂取カロリー合計"],
-                calculated_data["運動消費カロリー"],
-                calculated_data["総消費カロリー"],
-                calculated_data["カロリーバランス"],
-                calculated_data["判定"],
-                calculated_data["コメント"],
-                calculated_data["備考"]
-            ])
+            st.success("記録を保存しました。")
 
-        st.success("記録を保存しました。")
 
-# -------------------------
-# 履歴表示
-# -------------------------
-st.header("保存履歴")
-st.caption("※新しい記録が上に表示されます")
+# =========================================================
+# 履歴タブ
+# =========================================================
+with tab2:
+    st.subheader("保存履歴")
+    st.caption("※新しい記録が上に表示されます")
 
-if os.path.exists(file_name):
-    df = pd.read_csv(file_name, encoding="utf-8-sig")
+    df = load_data()
 
     if not df.empty:
-        # 日付を datetime に変換して新しい順に並べ替え
-        df["日付"] = pd.to_datetime(df["日付"], errors="coerce")
-        df = df.sort_values("日付", ascending=False).reset_index(drop=True)
-
-        # 表示用に日付を文字列へ戻す
         df_display = df.copy()
         df_display["日付"] = df_display["日付"].dt.strftime("%Y-%m-%d")
-
-        # 行番号を1から始める
         df_display.index = df_display.index + 1
 
-        st.dataframe(df_display, use_container_width=True)
+        # スマホで全部横に広い表は見づらいので主要項目だけ表示
+        st.dataframe(
+            df_display[["日付", "体重(kg)", "年齢", "体型", "活動量", "1日目安カロリー"]],
+            use_container_width=True
+        )
 
-        # -------------------------
-        # 削除機能
-        # -------------------------
-        st.subheader("保存履歴を削除")
+        st.write("### 記録の詳細")
+        for i, row in df.iterrows():
+            title = f"{row['日付'].strftime('%Y-%m-%d')} / {row['体重(kg)']}kg / {row['体型']}"
+            with st.expander(title):
+                st.write(f"**年齢**: {row['年齢']}")
+                st.write(f"**去勢避妊**: {row['去勢避妊']}")
+                st.write(f"**活動量**: {row['活動量']}")
+                st.write(f"**RER**: {row['RER']} kcal")
+                st.write(f"**推定MER**: {row['推定MER']} kcal")
+                st.write(f"**1日目安カロリー**: {row['1日目安カロリー']} kcal")
+                if isinstance(row["備考"], str) and row["備考"] != "":
+                    st.write(f"**備考**: {row['備考']}")
+
+        st.divider()
+        st.write("### 履歴を削除")
 
         delete_index = st.number_input(
             "削除したい行番号を入力してください",
             min_value=1,
             max_value=len(df_display),
-            step=1
+            step=1,
+            key="delete_index"
         )
 
-        st.warning(
-            f"{delete_index}行目を削除しようとしています。"
-            "本当に削除する場合は、下のチェックを入れてください。"
-        )
+        st.warning(f"{delete_index}行目を削除しようとしています。削除してよければチェックを入れてください。")
+        confirm_delete = st.checkbox("削除を実行してもよい", key="confirm_delete")
 
-        confirm_delete = st.checkbox("削除を実行してもよい")
-
-        if st.button("選んだ行を削除する"):
+        if st.button("選んだ行を削除する", use_container_width=True):
             if confirm_delete:
+                target_row = df.iloc[delete_index - 1]
+                target_photo = target_row["写真ファイル名"]
+
+                if isinstance(target_photo, str) and target_photo != "":
+                    target_photo_path = os.path.join(photo_dir, target_photo)
+                    if os.path.exists(target_photo_path):
+                        os.remove(target_photo_path)
+
                 df = df.drop(index=delete_index - 1).reset_index(drop=True)
                 df["日付"] = df["日付"].dt.strftime("%Y-%m-%d")
                 df.to_csv(file_name, index=False, encoding="utf-8-sig")
-                st.success(f"{delete_index}行目を削除しました。ページを再読み込みすると反映が見やすいです。")
+                st.success(f"{delete_index}行目を削除しました。ページを再読み込みすると見やすいです。")
             else:
                 st.error("削除前の確認チェックが入っていません。")
 
     else:
-        st.info("保存された記録はありますが、中身は空です。")
-else:
-    st.info("まだ保存された記録はありません。")
+        st.info("まだ保存された記録はありません。")
 
-# -------------------------
-# グラフ表示
-# -------------------------
-st.header("グラフ")
 
-if os.path.exists(file_name):
-    df_graph = pd.read_csv(file_name, encoding="utf-8-sig")
+# =========================================================
+# アルバムタブ
+# =========================================================
+with tab3:
+    st.subheader("小町の成長アルバム")
 
-    if not df_graph.empty:
-        # 日付を日付型に変換
-        df_graph["日付"] = pd.to_datetime(df_graph["日付"], errors="coerce")
+    df = load_data()
 
-        # グラフ用は古い順に並べる
-        df_graph = df_graph.sort_values("日付", ascending=True).copy()
+    if not df.empty:
+        has_photo = False
 
-        # 体重の推移
-        st.subheader("体重の推移")
-        weight_chart = df_graph.set_index("日付")[["体重(kg)"]]
-        st.line_chart(weight_chart)
+        for _, row in df.iterrows():
+            photo_file = row["写真ファイル名"]
 
-        # カロリーバランスの推移
-        st.subheader("カロリーバランスの推移")
-        balance_chart = df_graph.set_index("日付")[["カロリーバランス"]]
-        st.line_chart(balance_chart)
+            if isinstance(photo_file, str) and photo_file != "":
+                photo_path = os.path.join(photo_dir, photo_file)
+
+                if os.path.exists(photo_path):
+                    has_photo = True
+                    st.write(f"### {row['日付'].strftime('%Y-%m-%d')}")
+                    st.image(photo_path, use_container_width=True)
+                    st.write(f"**体重**: {row['体重(kg)']} kg")
+                    st.write(f"**体型**: {row['体型']}")
+                    st.write(f"**1日目安カロリー**: {row['1日目安カロリー']} kcal")
+                    if isinstance(row["備考"], str) and row["備考"] != "":
+                        st.write(f"**メモ**: {row['備考']}")
+                    st.divider()
+
+        if not has_photo:
+            st.info("写真付きの記録はまだありません。")
 
     else:
-        st.info("グラフ表示できる記録がまだありません。")
-else:
-    st.info("保存ファイルがまだありません。")
+        st.info("まだ保存された記録はありません。")
