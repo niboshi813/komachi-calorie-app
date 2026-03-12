@@ -5,6 +5,8 @@ import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
+from PIL import Image
+import io
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -84,6 +86,18 @@ def overwrite_data(df):
 
 
 def upload_photo_to_drive(uploaded_file, file_name):
+    def compress_image(uploaded_file):
+
+    img = Image.open(uploaded_file)
+
+    img.thumbnail((1280,1280))
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=85)
+
+    buffer.seek(0)
+
+    return buffer
     _, drive_service = get_google_clients()
 
     file_metadata = {
@@ -91,7 +105,7 @@ def upload_photo_to_drive(uploaded_file, file_name):
         "parents": [st.secrets["app"]["drive_folder_id"]]
     }
 
-    file_stream = io.BytesIO(uploaded_file.getvalue())
+    file_stream = compress_image(photo)
     media = MediaIoBaseUpload(file_stream, mimetype=uploaded_file.type)
 
     created_file = drive_service.files().create(
@@ -382,3 +396,4 @@ try:
 
 except Exception as e:
     st.error(f"グラフの読み込みに失敗しました: {e}")
+
