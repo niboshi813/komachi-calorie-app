@@ -88,16 +88,16 @@ def overwrite_data(df):
 def upload_photo_to_drive(uploaded_file, file_name):
     def compress_image(uploaded_file):
 
-    img = Image.open(uploaded_file)
+        img = Image.open(uploaded_file)
 
-    img.thumbnail((1280,1280))
+        img.thumbnail((1280,1280))
 
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=85)
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=85)
 
-    buffer.seek(0)
+        buffer.seek(0)
 
-    return buffer
+        return buffer
     _, drive_service = get_google_clients()
 
     file_metadata = {
@@ -396,4 +396,5 @@ try:
 
 except Exception as e:
     st.error(f"グラフの読み込みに失敗しました: {e}")
+
 
