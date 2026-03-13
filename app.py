@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🐶 小町の健康管理アプリ")
-st.caption("必要カロリー計算 + Googleスプレッドシート保存の安定版")
+st.caption("必要カロリー計算 + フード量計算 + Googleスプレッドシート保存")
 
 
 # -------------------------
@@ -50,6 +50,9 @@ def load_data():
         "RER",
         "推定MER",
         "1日目安カロリー",
+        "フード商品名",
+        "100gカロリー",
+        "必要フード量(g)",
         "メモ"
     ]
 
@@ -152,6 +155,22 @@ with tab1:
         key="activity_level"
     )
 
+    st.divider()
+    st.subheader("フード情報")
+
+    food_name = st.text_input(
+        "フード商品名",
+        placeholder="例：ロイヤルカナン ミニ インドア アダルト",
+        key="food_name"
+    )
+
+    food_kcal = st.number_input(
+        "100gあたりカロリー (kcal)",
+        min_value=0.0,
+        step=1.0,
+        key="food_kcal"
+    )
+
     memo = st.text_area(
         "メモ・備考",
         placeholder="例：食欲あり、便の状態よし、元気に散歩できた",
@@ -167,6 +186,10 @@ with tab1:
             mer = rer * mer_factor
             daily_kcal = mer
 
+            food_amount = ""
+            if food_kcal > 0:
+                food_amount = round(daily_kcal / (food_kcal / 100), 1)
+
             st.session_state["calculated_result"] = {
                 "日付": str(log_date),
                 "体重(kg)": round(weight, 1),
@@ -177,6 +200,9 @@ with tab1:
                 "RER": round(rer, 1),
                 "推定MER": round(mer, 1),
                 "1日目安カロリー": round(daily_kcal, 1),
+                "フード商品名": food_name,
+                "100gカロリー": round(food_kcal, 1) if food_kcal > 0 else "",
+                "必要フード量(g)": food_amount,
                 "メモ": memo
             }
 
@@ -190,7 +216,16 @@ with tab1:
         st.metric("推定MER", f'{result["推定MER"]:.1f} kcal')
         st.metric("1日目安カロリー", f'{result["1日目安カロリー"]:.1f} kcal')
 
+        if result["必要フード量(g)"] != "":
+            st.metric("1日必要フード量", f'{result["必要フード量(g)"]:.1f} g')
+
         st.info("これは推定値です。2〜4週間の体重変化を見ながら食事量を調整してください。")
+
+        if result["フード商品名"]:
+            st.write(f'**フード商品名**: {result["フード商品名"]}')
+
+        if result["100gカロリー"] != "":
+            st.write(f'**100gあたりカロリー**: {result["100gカロリー"]:.1f} kcal')
 
         if result["メモ"]:
             st.write(f'**メモ**: {result["メモ"]}')
@@ -222,7 +257,15 @@ with tab2:
 
             # スマホ向けに主要項目だけ表示
             st.dataframe(
-                df_display[["日付", "体重(kg)", "年齢", "体型", "活動量", "1日目安カロリー"]],
+                df_display[[
+                    "日付",
+                    "体重(kg)",
+                    "年齢",
+                    "体型",
+                    "活動量",
+                    "1日目安カロリー",
+                    "必要フード量(g)"
+                ]],
                 use_container_width=True
             )
 
@@ -238,6 +281,16 @@ with tab2:
                     st.write(f"**RER**: {row['RER']} kcal")
                     st.write(f"**推定MER**: {row['推定MER']} kcal")
                     st.write(f"**1日目安カロリー**: {row['1日目安カロリー']} kcal")
+
+                    if "フード商品名" in row and isinstance(row["フード商品名"], str) and row["フード商品名"] != "":
+                        st.write(f"**フード商品名**: {row['フード商品名']}")
+
+                    if "100gカロリー" in row and str(row["100gカロリー"]) != "":
+                        st.write(f"**100gあたりカロリー**: {row['100gカロリー']} kcal")
+
+                    if "必要フード量(g)" in row and str(row["必要フード量(g)"]) != "":
+                        st.write(f"**必要フード量**: {row['必要フード量(g)']} g")
+
                     if isinstance(row["メモ"], str) and row["メモ"] != "":
                         st.write(f"**メモ**: {row['メモ']}")
 
@@ -278,6 +331,16 @@ with tab2:
             kcal_chart = df_graph.set_index("日付")[["1日目安カロリー"]]
             st.line_chart(kcal_chart)
 
+            if "必要フード量(g)" in df_graph.columns:
+                # 空文字をNaNに寄せてグラフ化しやすくする
+                food_chart_df = df_graph.copy()
+                food_chart_df["必要フード量(g)"] = pd.to_numeric(
+                    food_chart_df["必要フード量(g)"], errors="coerce"
+                )
+                if food_chart_df["必要フード量(g)"].notna().any():
+                    st.write("**必要フード量の推移**")
+                    food_chart = food_chart_df.set_index("日付")[["必要フード量(g)"]]
+                    st.line_chart(food_chart)
+
     except Exception as e:
         st.error(f"履歴の読み込みに失敗しました: {e}")
-
