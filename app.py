@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("🐶 小町の健康管理アプリ")
-st.caption("必要カロリー計算 + フード量計算 + Googleスプレッドシート保存")
+st.caption("必要カロリー計算 + フード量計算 + おやつ調整 + Googleスプレッドシート保存")
 
 
 # -------------------------
@@ -52,7 +52,10 @@ def load_data():
         "1日目安カロリー",
         "フード商品名",
         "100gカロリー",
+        "おやつカロリー",
+        "フードに使えるカロリー",
         "必要フード量(g)",
+        "うんち回数",
         "メモ"
     ]
 
@@ -74,7 +77,6 @@ def append_data(row_dict):
     worksheet = get_worksheet()
     existing_values = worksheet.get_all_values()
 
-    # シートが完全に空なら見出しを先に追加
     if not existing_values:
         worksheet.append_row(list(row_dict.keys()))
 
@@ -114,6 +116,39 @@ def get_mer_factor(age_group, neutered, body_type, activity_level):
     }[activity_level]
 
     return base * body_factor * activity_factor
+
+
+# -------------------------
+# 日単位の表示用に集計
+# -------------------------
+def make_daily_summary(df):
+    if df.empty:
+        return df
+
+    temp = df.copy()
+    temp["日付"] = pd.to_datetime(temp["日付"], errors="coerce")
+
+    numeric_cols = [
+        "体重(kg)",
+        "1日目安カロリー",
+        "必要フード量(g)",
+        "おやつカロリー",
+        "うんち回数"
+    ]
+
+    for col in numeric_cols:
+        if col in temp.columns:
+            temp[col] = pd.to_numeric(temp[col], errors="coerce")
+
+    daily = temp.groupby("日付", as_index=False).agg({
+        "体重(kg)": "mean",
+        "1日目安カロリー": "mean",
+        "必要フード量(g)": "mean",
+        "おやつカロリー": "sum",
+        "うんち回数": "sum"
+    })
+
+    return daily.sort_values("日付", ascending=True)
 
 
 # -------------------------
@@ -171,6 +206,20 @@ with tab1:
         key="food_kcal"
     )
 
+    snack_kcal = st.number_input(
+        "おやつカロリー (kcal)",
+        min_value=0.0,
+        step=1.0,
+        key="snack_kcal"
+    )
+
+    poop_count = st.number_input(
+        "うんち回数",
+        min_value=0,
+        step=1,
+        key="poop_count"
+    )
+
     memo = st.text_area(
         "メモ・備考",
         placeholder="例：食欲あり、便の状態よし、元気に散歩できた",
@@ -186,9 +235,13 @@ with tab1:
             mer = rer * mer_factor
             daily_kcal = mer
 
+            food_available_kcal = daily_kcal - snack_kcal
+            if food_available_kcal < 0:
+                food_available_kcal = 0
+
             food_amount = ""
             if food_kcal > 0:
-                food_amount = round(daily_kcal / (food_kcal / 100), 1)
+                food_amount = round(food_available_kcal / (food_kcal / 100), 1)
 
             st.session_state["calculated_result"] = {
                 "日付": str(log_date),
@@ -202,7 +255,10 @@ with tab1:
                 "1日目安カロリー": round(daily_kcal, 1),
                 "フード商品名": food_name,
                 "100gカロリー": round(food_kcal, 1) if food_kcal > 0 else "",
+                "おやつカロリー": round(snack_kcal, 1),
+                "フードに使えるカロリー": round(food_available_kcal, 1),
                 "必要フード量(g)": food_amount,
+                "うんち回数": poop_count,
                 "メモ": memo
             }
 
@@ -215,6 +271,7 @@ with tab1:
         st.metric("RER", f'{result["RER"]:.1f} kcal')
         st.metric("推定MER", f'{result["推定MER"]:.1f} kcal')
         st.metric("1日目安カロリー", f'{result["1日目安カロリー"]:.1f} kcal')
+        st.metric("おやつを引いたフード用カロリー", f'{result["フードに使えるカロリー"]:.1f} kcal')
 
         if result["必要フード量(g)"] != "":
             st.metric("1日必要フード量", f'{result["必要フード量(g)"]:.1f} g')
@@ -226,6 +283,9 @@ with tab1:
 
         if result["100gカロリー"] != "":
             st.write(f'**100gあたりカロリー**: {result["100gカロリー"]:.1f} kcal')
+
+        st.write(f'**おやつカロリー**: {result["おやつカロリー"]:.1f} kcal')
+        st.write(f'**うんち回数**: {result["うんち回数"]} 回')
 
         if result["メモ"]:
             st.write(f'**メモ**: {result["メモ"]}')
@@ -255,7 +315,6 @@ with tab2:
             df_display["日付"] = df_display["日付"].dt.strftime("%Y-%m-%d")
             df_display.index = df_display.index + 1
 
-            # スマホ向けに主要項目だけ表示
             st.dataframe(
                 df_display[[
                     "日付",
@@ -264,7 +323,8 @@ with tab2:
                     "体型",
                     "活動量",
                     "1日目安カロリー",
-                    "必要フード量(g)"
+                    "必要フード量(g)",
+                    "うんち回数"
                 ]],
                 use_container_width=True
             )
@@ -288,8 +348,17 @@ with tab2:
                     if "100gカロリー" in row and str(row["100gカロリー"]) != "":
                         st.write(f"**100gあたりカロリー**: {row['100gカロリー']} kcal")
 
+                    if "おやつカロリー" in row and str(row["おやつカロリー"]) != "":
+                        st.write(f"**おやつカロリー**: {row['おやつカロリー']} kcal")
+
+                    if "フードに使えるカロリー" in row and str(row["フードに使えるカロリー"]) != "":
+                        st.write(f"**フードに使えるカロリー**: {row['フードに使えるカロリー']} kcal")
+
                     if "必要フード量(g)" in row and str(row["必要フード量(g)"]) != "":
                         st.write(f"**必要フード量**: {row['必要フード量(g)']} g")
+
+                    if "うんち回数" in row and str(row["うんち回数"]) != "":
+                        st.write(f"**うんち回数**: {row['うんち回数']} 回")
 
                     if isinstance(row["メモ"], str) and row["メモ"] != "":
                         st.write(f"**メモ**: {row['メモ']}")
@@ -319,28 +388,33 @@ with tab2:
                     st.cache_resource.clear()
 
             st.divider()
-            st.subheader("グラフ")
+            st.subheader("日ごとのグラフ")
 
-            df_graph = df.sort_values("日付", ascending=True).copy()
+            daily_df = make_daily_summary(df)
 
-            st.write("**体重の推移**")
-            weight_chart = df_graph.set_index("日付")[["体重(kg)"]]
-            st.line_chart(weight_chart)
+            if not daily_df.empty:
+                st.write("**体重の推移（日単位）**")
+                weight_chart = daily_df.set_index("日付")[["体重(kg)"]]
+                st.line_chart(weight_chart)
 
-            st.write("**1日目安カロリーの推移**")
-            kcal_chart = df_graph.set_index("日付")[["1日目安カロリー"]]
-            st.line_chart(kcal_chart)
+                st.write("**1日目安カロリーの推移（日単位）**")
+                kcal_chart = daily_df.set_index("日付")[["1日目安カロリー"]]
+                st.line_chart(kcal_chart)
 
-            if "必要フード量(g)" in df_graph.columns:
-                # 空文字をNaNに寄せてグラフ化しやすくする
-                food_chart_df = df_graph.copy()
-                food_chart_df["必要フード量(g)"] = pd.to_numeric(
-                    food_chart_df["必要フード量(g)"], errors="coerce"
-                )
-                if food_chart_df["必要フード量(g)"].notna().any():
-                    st.write("**必要フード量の推移**")
-                    food_chart = food_chart_df.set_index("日付")[["必要フード量(g)"]]
+                if "必要フード量(g)" in daily_df.columns:
+                    st.write("**必要フード量の推移（日単位）**")
+                    food_chart = daily_df.set_index("日付")[["必要フード量(g)"]]
                     st.line_chart(food_chart)
+
+                if "おやつカロリー" in daily_df.columns:
+                    st.write("**おやつカロリーの推移（日単位）**")
+                    snack_chart = daily_df.set_index("日付")[["おやつカロリー"]]
+                    st.line_chart(snack_chart)
+
+                if "うんち回数" in daily_df.columns:
+                    st.write("**うんち回数の推移（日単位）**")
+                    poop_chart = daily_df.set_index("日付")[["うんち回数"]]
+                    st.line_chart(poop_chart)
 
     except Exception as e:
         st.error(f"履歴の読み込みに失敗しました: {e}")
